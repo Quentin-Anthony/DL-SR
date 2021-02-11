@@ -12,6 +12,7 @@ from utils.lr_controller import ReduceLROnPlateau
 from utils.data_loader import data_loader, data_loader_multi_channel
 from utils.utils import img_comp
 from utils.loss import loss_mse_ssim
+import horovod.keras as hvd
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--gpu_id", type=int, default=1)
@@ -35,6 +36,7 @@ parser.add_argument("--lr_decay_factor", type=float, default=0.5)
 parser.add_argument("--load_weights", type=int, default=0)
 parser.add_argument("--optimizer_name", type=str, default="adam")
 
+hvd.init()
 args = parser.parse_args()
 gpu_id = str(args.gpu_id)
 gpu_memory_fraction = args.gpu_memory_fraction
@@ -60,7 +62,9 @@ sample_interval = args.sample_interval
 os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = mixed_precision_training
 os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_memory_fraction)
-tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+#config = tf.ConfigProto(gpu_options=gpu_options)
+#config.gpu_options.visible_device_list = str(hvd.local_rank())
+tf.Session(config=tf.ConfigProto(gpu_options=gpu_options,visible_device_list=str(hvd.local_rank()))
 
 data_name = data_dir.split('/')[-1]
 if input_channels == 1:
@@ -88,7 +92,9 @@ if not os.path.exists(sample_path):
 # --------------------------------------------------------------------------------
 modelFns = {'DFCAN': DFCAN16.DFCAN}
 modelFN = modelFns[model_name]
-optimizer_g = optimizers.adam(lr=start_lr, beta_1=0.9, beta_2=0.999)
+optimizer_g = optimizers.adam(lr=start_lr * hvd.size(), beta_1=0.9, beta_2=0.999)
+optimizer_g = hvd.DistributedOptimizer(optimizer_g)
+hvd.callbacks.BroadcastGlobalVariablesCallback(0)
 
 # --------------------------------------------------------------------------------
 #                              define combined model
